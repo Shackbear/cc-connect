@@ -319,8 +319,11 @@ func (p *Platform) connectLoop(ctx context.Context) {
 		default:
 		}
 
-		// Exponential backoff
+		// Exponential backoff (clamp attempt to avoid uint overflow in shift)
 		attempt++
+		if attempt > 30 {
+			attempt = 30
+		}
 		delay := time.Duration(1<<uint(attempt)) * time.Second
 		if delay > maxReconnectWait {
 			delay = maxReconnectWait
@@ -1008,7 +1011,7 @@ func readFile(path string) ([]byte, error) {
 }
 
 func writeFile(path string, data string) error {
-	return os.WriteFile(path, []byte(data), 0o644)
+	return os.WriteFile(path, []byte(data), 0o600)
 }
 
 // getEnvWithPrefix gets environment variable

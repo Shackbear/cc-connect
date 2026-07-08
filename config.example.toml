@@ -2046,6 +2046,10 @@ app_secret = "your-feishu-app-secret"
 #   app_id: WPS协作 -> 数字员工 -> 设置 -> App ID
 #   wps_sid: 浏览器登录 https://agentspace.wps.cn -> F12 -> Application -> Cookies -> wps_sid
 #
+#   首次启动时如果 wps_sid 留空，会自动打开浏览器登录并获取 token。
+#   Token 会加密保存到配置文件，下次启动自动解密，无需重复获取。
+#   如果更换了 app_id，旧 token 会自动尝试 fallback 解密，仍失败则需重新登录。
+#
 # [[projects]]
 # name = "wps-agentspace"
 #

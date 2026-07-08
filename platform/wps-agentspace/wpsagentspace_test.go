@@ -1,6 +1,7 @@
 package wpsagentspace
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -371,4 +372,75 @@ func TestAutoLogin_Success(t *testing.T) {
 	if encrypted == "" {
 		t.Error("autoLogin() returned empty encrypted token")
 	}
+}
+
+func TestAutoLogin_PollingRetry(t *testing.T) {
+	appID := "AK-poll-retry"
+	expectedToken := "token-after-retries"
+	callCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/login_url":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": map[string]string{"code": "c1", "url": "http://example.com/login"},
+			})
+		case "/user_token":
+			callCount++
+			if callCount < 3 {
+				// First two polls: no token yet (user hasn't logged in).
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{}})
+			} else {
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"token": expectedToken}})
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	origLogin, origToken, origPoll, origBrowser := loginURLAPI, userTokenAPI, pollInterval, openBrowser
+	loginURLAPI = server.URL + "/login_url"
+	userTokenAPI = server.URL + "/user_token"
+	pollInterval = 10 * time.Millisecond
+	openBrowser = func(string) {}
+	t.Cleanup(func() {
+		loginURLAPI, userTokenAPI, pollInterval, openBrowser = origLogin, origToken, origPoll, origBrowser
+	})
+
+	raw, _, err := autoLogin(appID)
+	if err != nil {
+		t.Fatalf("autoLogin() error: %v", err)
+	}
+	if raw != expectedToken {
+		t.Errorf("autoLogin() raw = %q, want %q", raw, expectedToken)
+	}
+	if callCount < 3 {
+		t.Errorf("expected at least 3 polling calls, got %d", callCount)
+	}
+}
+
+func TestStop_ConcurrentSafety(t *testing.T) {
+	p := &Platform{
+		appID:      "AK-stop",
+		deviceUuid: "dev-stop",
+		deviceName: "test",
+	}
+	// Start a connectLoop goroutine (it will fail to connect but that's fine).
+	ctx, cancel := context.WithCancel(context.Background())
+	p.cancel = cancel
+	go p.connectLoop(ctx)
+
+	// Call Stop concurrently from multiple goroutines.
+	done := make(chan struct{})
+	for i := 0; i < 10; i++ {
+		go func() {
+			_ = p.Stop()
+			done <- struct{}{}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+	// If this passes with -race, the stopped field is safely accessed.
 }
